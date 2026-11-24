@@ -1,0 +1,6 @@
+{
+  "name": "AETHER HORIZON: DIMENSIONAL SHIFT",
+  "description": "3D Action Racing & Flight Endless Game across Ground, Sky, and Space dimensions with 200 procedural vehicles, 8 weapon systems, modular bosses, and 20 worlds.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
