@@ -143,6 +143,26 @@ const EN: Dict = {
   dim_18: 'Solar Kingdom',
   dim_19: 'Quantum Rift',
   dim_20: 'Eternal Horizon',
+  support: 'SUPPORT',
+  support_title: 'SUPPORT THE CREATOR',
+  support_desc: 'Enjoying Aether Horizon? Your support funds new 3D dimensions, vehicles, and bosses.',
+  support_promptpay_title: 'Thai PromptPay QR',
+  support_amount: 'Select Amount (THB)',
+  support_open_qr: 'Any Amount',
+  support_scan_qr: 'Scan with any Thai banking app',
+  support_kofi: 'Support on Ko-fi',
+  support_itch: 'Get Pack / Tip on itch.io',
+  support_bank_title: 'Bank Transfer',
+  support_bank_name: 'Bank',
+  support_bank_account: 'Account No.',
+  support_bank_holder: 'Account Name',
+  support_copy_account: 'Copy Account No.',
+  support_copied: 'Copied!',
+  support_not_configured: 'Direct creator tip channels are opening soon. Thank you for playing!',
+  watch_ad_revive: 'WATCH AD · REVIVE',
+  watch_ad_double_coins: 'WATCH AD · 2X COINS',
+  revived_notif: 'SECOND CHANCE!',
+  coins_doubled_notif: '2X COINS CLAIMED!',
   webgl_error: 'WebGL could not be initialized on this browser/device.',
 };
 
@@ -271,6 +291,26 @@ const TH: Dict = {
   dim_18: 'อาณาจักรสุริยะ',
   dim_19: 'รอยแยกควอนตัม',
   dim_20: 'ขอบฟ้านิรันดร์',
+  support: 'สนับสนุน',
+  support_title: 'สนับสนุนผู้พัฒนาเกม',
+  support_desc: 'ชอบเกม Aether Horizon ไหมครับ? การสนับสนุนของคุณช่วยต่อยอดสร้างมิติและยานใหม่ๆ เพิ่มอีกเพียบ!',
+  support_promptpay_title: 'สแกนจ่ายผ่านพร้อมเพย์ (PromptPay QR)',
+  support_amount: 'เลือกจำนวนเงิน (บาท)',
+  support_open_qr: 'ระบุยอดเอง',
+  support_scan_qr: 'สแกนได้ด้วยแอปธนาคารไทยทุกธนาคาร',
+  support_kofi: 'สนับสนุนผ่าน Ko-fi',
+  support_itch: 'ซื้อแพ็ก / ให้ทิปบน itch.io',
+  support_bank_title: 'โอนผ่านบัญชีธนาคาร',
+  support_bank_name: 'ธนาคาร',
+  support_bank_account: 'เลขที่บัญชี',
+  support_bank_holder: 'ชื่อบัญชี',
+  support_copy_account: 'คัดลอกเลขบัญชี',
+  support_copied: 'คัดลอกแล้ว!',
+  support_not_configured: 'ช่องทางสนับสนุนผู้พัฒนากำลังเปิดให้บริการเร็วๆ นี้ ขอบคุณที่ร่วมสนุกครับ!',
+  watch_ad_revive: 'ดูโฆษณา · คืนชีพเล่นต่อ',
+  watch_ad_double_coins: 'ดูโฆษณา · รับเหรียญ x2',
+  revived_notif: 'คืนชีพสำเร็จ!',
+  coins_doubled_notif: 'รับเหรียญ x2 เรียบร้อย!',
   webgl_error: 'เบราว์เซอร์หรืออุปกรณ์นี้ไม่รองรับ WebGL',
 };
 
@@ -332,6 +372,10 @@ const JA: Dict = {
   dim_18: '太陽王国',
   dim_19: '量子リフト',
   dim_20: '永遠の地平線',
+  support: '応援する',
+  support_title: 'クリエイターを応援',
+  watch_ad_revive: '広告を見て復活',
+  watch_ad_double_coins: '広告を見てコイン2倍',
 };
 
 const ZH: Dict = {
@@ -392,6 +436,10 @@ const ZH: Dict = {
   dim_18: '太阳王国',
   dim_19: '量子裂隙',
   dim_20: '永恒地平线',
+  support: '支持作者',
+  support_title: '支持开发者',
+  watch_ad_revive: '观看广告复活',
+  watch_ad_double_coins: '观看广告双倍金币',
 };
 
 const KO: Dict = {
@@ -452,6 +500,10 @@ const KO: Dict = {
   dim_18: '태양 왕국',
   dim_19: '양자 균열',
   dim_20: '영원의 지평선',
+  support: '후원하기',
+  support_title: '개발자 후원',
+  watch_ad_revive: '광고 보고 부활',
+  watch_ad_double_coins: '광고 보고 코인 2배',
 };
 
 const ES: Dict = {
@@ -492,6 +544,10 @@ const ES: Dict = {
   vehicle_not_compatible: 'VEHÍCULO NO COMPATIBLE',
   route_title: 'GRIETA DIMENSIONAL DETECTADA',
   boss_warning: 'GUARDIÁN DIMENSIONAL ACERCÁNDOSE',
+  support: 'APOYAR',
+  support_title: 'APOYAR AL CREADOR',
+  watch_ad_revive: 'VER ANUNCIO · REVIVIR',
+  watch_ad_double_coins: 'VER ANUNCIO · MONEDAS X2',
 };
 
 const DICTIONARIES: Record<LanguageCode, Dict> = {

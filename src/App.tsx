@@ -5,9 +5,11 @@ import { GameplayHUD } from './components/GameplayHUD';
 import { GarageModal } from './components/GarageModal';
 import { RouteSelectionModal } from './components/RouteSelectionModal';
 import { SettingsModal } from './components/SettingsModal';
+import { SupportModal } from './components/SupportModal';
 import { TitleScreen } from './components/TitleScreen';
 import { UpgradesModal } from './components/UpgradesModal';
 import { audioManager } from './game/audio';
+import { crazyGames } from './game/crazygames';
 import { GameEngine } from './game/engine';
 import {
   purchaseUpgrade,
@@ -91,6 +93,9 @@ export default function App() {
   const routesRef = useRef<RouteOption[]>([]);
   const [lastRunStats, setLastRunStats] = useState<RunStats | null>(null);
   const [webglError, setWebglError] = useState<string | null>(null);
+  const [showSupportModal, setShowSupportModal] = useState(false);
+  const [coinsDoubledThisRun, setCoinsDoubledThisRun] = useState(false);
+  const [adLoading, setAdLoading] = useState(false);
   const [selectedDimId, setSelectedDimId] = useState<number>(() => {
     const raw = Number(new URLSearchParams(window.location.search).get('dim'));
     return Number.isFinite(raw) && raw >= 1 && raw <= 20 ? Math.floor(raw) : 3;
@@ -260,7 +265,44 @@ export default function App() {
   const handleStartPlay = () => {
     audioManager.playUiClick();
     (document.activeElement as HTMLElement | null)?.blur?.();
+    setCoinsDoubledThisRun(false);
+    setShowSupportModal(false);
     engineRef.current?.startNewRun();
+  };
+
+  const handleWatchReviveAd = () => {
+    if (adLoading) return;
+    setAdLoading(true);
+    const started = crazyGames.requestRewardedAd(
+      () => {
+        engineRef.current?.reviveCurrentRun();
+      },
+      () => {
+        setAdLoading(false);
+      }
+    );
+    if (!started) setAdLoading(false);
+  };
+
+  const handleWatchDoubleCoinsAd = () => {
+    if (adLoading || coinsDoubledThisRun || !lastRunStats || lastRunStats.coinsEarned <= 0) return;
+    setAdLoading(true);
+    const bonus = lastRunStats.coinsEarned;
+    const started = crazyGames.requestRewardedAd(
+      () => {
+        setCoinsDoubledThisRun(true);
+        const cur = saveRef.current;
+        commitSave({
+          ...cur,
+          coins: cur.coins + bonus,
+        });
+        setLastRunStats((prev) => (prev ? { ...prev, coinsEarned: prev.coinsEarned + bonus } : prev));
+      },
+      () => {
+        setAdLoading(false);
+      }
+    );
+    if (!started) setAdLoading(false);
   };
 
   const handleBuyOrSelectVehicle = (id: number) => {
@@ -366,6 +408,14 @@ export default function App() {
             audioManager.playUiClick();
             engineRef.current?.setState('SETTINGS');
           }}
+          onOpenSupport={
+            crazyGames.isAvailable()
+              ? undefined
+              : () => {
+                  audioManager.playUiClick();
+                  setShowSupportModal(true);
+                }
+          }
           onChangeLanguage={handleChangeLanguage}
         />
       )}
@@ -477,10 +527,27 @@ export default function App() {
           stats={lastRunStats}
           highScore={save.highScore}
           lang={save.language}
+          canWatchReviveAd={crazyGames.isAvailable() && !(engineRef.current?.hasUsedRevive() ?? true)}
+          canDoubleCoinsAd={crazyGames.isAvailable() && !coinsDoubledThisRun}
+          adLoading={adLoading}
+          onWatchReviveAd={handleWatchReviveAd}
+          onWatchDoubleCoinsAd={handleWatchDoubleCoinsAd}
+          onOpenSupport={
+            crazyGames.isAvailable()
+              ? undefined
+              : () => {
+                  audioManager.playUiClick();
+                  setShowSupportModal(true);
+                }
+          }
           onRetry={handleStartPlay}
           onGarage={() => engineRef.current?.setState('GARAGE')}
           onMainMenu={() => engineRef.current?.setState('MAIN_MENU')}
         />
+      )}
+
+      {showSupportModal && (
+        <SupportModal lang={save.language} onClose={() => setShowSupportModal(false)} />
       )}
     </div>
   );

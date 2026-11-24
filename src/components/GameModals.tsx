@@ -49,6 +49,12 @@ interface GameOverModalProps {
   stats: RunStats;
   highScore: number;
   lang: LanguageCode;
+  canWatchReviveAd?: boolean;
+  canDoubleCoinsAd?: boolean;
+  adLoading?: boolean;
+  onWatchReviveAd?: () => void;
+  onWatchDoubleCoinsAd?: () => void;
+  onOpenSupport?: () => void;
   onRetry: () => void;
   onGarage: () => void;
   onMainMenu: () => void;
@@ -58,12 +64,18 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
   stats,
   highScore,
   lang,
+  canWatchReviveAd,
+  canDoubleCoinsAd,
+  adLoading,
+  onWatchReviveAd,
+  onWatchDoubleCoinsAd,
+  onOpenSupport,
   onRetry,
   onGarage,
   onMainMenu,
 }) => (
   <div className="fixed inset-0 z-30 flex items-center justify-center p-4 bg-[#03060f]/85">
-    <div className="w-full max-w-md rounded-2xl bg-[#090f1e] border border-rose-500/40 p-6 flex flex-col gap-5">
+    <div className="w-full max-w-md rounded-2xl bg-[#090f1e] border border-rose-500/40 p-6 flex flex-col gap-4">
       <div className="text-center">
         <h2 className="text-2xl font-['Chakra_Petch'] font-bold text-rose-400 tracking-wider">
           {t(lang, 'game_over')}
@@ -112,6 +124,31 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
         </div>
       </div>
 
+      {(canWatchReviveAd || canDoubleCoinsAd) && (
+        <div className="flex flex-col gap-2">
+          {canWatchReviveAd && onWatchReviveAd && (
+            <button
+              type="button"
+              disabled={adLoading}
+              onClick={onWatchReviveAd}
+              className="w-full py-2.5 rounded-lg bg-emerald-400 hover:bg-emerald-300 disabled:opacity-60 text-slate-950 font-bold text-sm tracking-wide cursor-pointer"
+            >
+              {t(lang, 'watch_ad_revive')}
+            </button>
+          )}
+          {canDoubleCoinsAd && onWatchDoubleCoinsAd && stats.coinsEarned > 0 && (
+            <button
+              type="button"
+              disabled={adLoading}
+              onClick={onWatchDoubleCoinsAd}
+              className="w-full py-2.5 rounded-lg bg-amber-400 hover:bg-amber-300 disabled:opacity-60 text-slate-950 font-bold text-sm tracking-wide cursor-pointer"
+            >
+              {t(lang, 'watch_ad_double_coins')} (+{stats.coinsEarned.toLocaleString()})
+            </button>
+          )}
+        </div>
+      )}
+
       <div className="flex flex-col sm:flex-row gap-2.5">
         <button
           type="button"
@@ -136,6 +173,17 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
           {t(lang, 'main_menu')}
         </button>
       </div>
+
+      {onOpenSupport && (
+        <button
+          type="button"
+          onClick={onOpenSupport}
+          className="w-full py-2 rounded-lg bg-slate-900 hover:bg-amber-500/15 border border-amber-400/35 text-amber-300 font-semibold text-xs tracking-wide cursor-pointer"
+        >
+          {t(lang, 'support')}
+        </button>
+      )}
     </div>
   </div>
 );
+

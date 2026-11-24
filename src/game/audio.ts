@@ -24,6 +24,7 @@ export class AudioManager {
   };
 
   private hasUserGesture = false;
+  private adMuted = false;
 
   unlock(): void {
     this.hasUserGesture = true;
@@ -54,10 +55,15 @@ export class AudioManager {
     this.applyVolumes();
   }
 
+  setAdMuted(muted: boolean): void {
+    this.adMuted = muted;
+    this.applyVolumes();
+  }
+
   private applyVolumes(): void {
     if (!this.ctx || !this.masterGain || !this.musicGain || !this.sfxGain) return;
     const now = this.ctx.currentTime;
-    const master = this.settings.muted ? 0 : this.settings.masterVolume;
+    const master = this.settings.muted || this.adMuted ? 0 : this.settings.masterVolume;
     this.masterGain.gain.setTargetAtTime(master, now, 0.04);
     this.musicGain.gain.setTargetAtTime(this.settings.musicVolume, now, 0.04);
     this.sfxGain.gain.setTargetAtTime(this.settings.sfxVolume, now, 0.04);

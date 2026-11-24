@@ -14,6 +14,7 @@ interface TitleScreenProps {
   onOpenUpgrades: () => void;
   onOpenCollection: () => void;
   onOpenSettings: () => void;
+  onOpenSupport?: () => void;
   onChangeLanguage: (lang: LanguageCode) => void;
 }
 
@@ -26,6 +27,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
   onOpenUpgrades,
   onOpenCollection,
   onOpenSettings,
+  onOpenSupport,
   onChangeLanguage,
 }) => {
   const lang = save.language;
@@ -122,6 +124,15 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
             >
               {t(lang, 'settings')}
             </button>
+            {onOpenSupport && (
+              <button
+                type="button"
+                onClick={onOpenSupport}
+                className="px-3.5 py-2.5 rounded-lg bg-[#050914]/75 hover:bg-amber-500/20 border border-amber-400/45 text-amber-300 font-semibold text-xs sm:text-sm transition-colors cursor-pointer whitespace-nowrap"
+              >
+                {t(lang, 'support')}
+              </button>
+            )}
           </div>
 
           {save.highScore > 0 && (

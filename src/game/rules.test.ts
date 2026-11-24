@@ -19,6 +19,14 @@ import {
   purchaseVehicle,
 } from './rules';
 import { HapticsManager } from './haptics';
+import {
+  buildPromptPayPayload,
+  crc16Ccitt,
+  hasAnyMonetizationChannel,
+  normalizePromptPayTarget,
+  sanitizeBankAccountDigits,
+  sanitizeExternalHttpsUrl,
+} from './monetization';
 import { INITIAL_COINS } from './config';
 
 test('Vehicle Database has 200 distinct vehicles across 4 categories and 8 weapons', () => {
@@ -176,4 +184,47 @@ test('Vibration API HapticsManager fires patterns with throttling and safe disab
   hm.setEnabled(true);
   assert.equal(hm.trigger('coin', 600, {}), false);
   assert.equal(calls.length, 4);
+});
+
+test('PromptPay EMVCo QR generator & URL sanitizer validate inputs and compute CRC16 cleanly', () => {
+  const mobile = normalizePromptPayTarget('081-234-5678');
+  assert.ok(mobile !== null);
+  assert.equal(mobile.subTag, '01');
+  assert.equal(mobile.formatted, '0066812345678');
+
+  const payload50 = buildPromptPayPayload('0812345678', 50);
+  assert.ok(payload50 !== null);
+  assert.ok(payload50.startsWith('000201010212'));
+  assert.ok(payload50.includes('0016A00000067701011101130066812345678'));
+  assert.ok(payload50.includes('5303764540550.005802TH6304'));
+  const body = payload50.slice(0, -4);
+  const crc = payload50.slice(-4);
+  assert.equal(crc, crc16Ccitt(body));
+
+  // Open-amount QR omits Tag 54 and uses 010211
+  const openQr = buildPromptPayPayload('0812345678');
+  assert.ok(openQr !== null);
+  assert.ok(openQr.startsWith('000201010211'));
+  assert.ok(!openQr.includes('5405'));
+
+  // Invalid PromptPay targets and non-HTTPS URLs are rejected
+  assert.equal(buildPromptPayPayload('12345'), null);
+  assert.equal(sanitizeExternalHttpsUrl('javascript:alert(1)'), null);
+  assert.equal(sanitizeExternalHttpsUrl('http://ko-fi.com/test'), null);
+  assert.equal(sanitizeExternalHttpsUrl('https://ko-fi.com/aetherhorizon'), 'https://ko-fi.com/aetherhorizon');
+
+  // Bank account validation & active channel detection
+  assert.equal(sanitizeBankAccountDigits('123-4-56789-0'), '123-4-56789-0');
+  assert.equal(sanitizeBankAccountDigits('1234'), null);
+  assert.equal(
+    hasAnyMonetizationChannel({
+      promptpayId: null,
+      bankName: 'KBank',
+      bankAccount: '123-4-56789-0',
+      bankHolder: null,
+      kofiUrl: null,
+      itchUrl: null,
+    }),
+    true
+  );
 });

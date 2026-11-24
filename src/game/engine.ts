@@ -12,6 +12,7 @@ import {
   PHYSICS_CONFIG,
   WEAPON_SPECS,
 } from './config';
+import { crazyGames } from './crazygames';
 import { getDimensionById } from './dimensions';
 import { haptics } from './haptics';
 import { t } from './localization';
@@ -120,6 +121,7 @@ export class GameEngine {
   private magnetTimer = 0;
   private overdriveCharge = 0;
   private overdriveTimer = 0;
+  private usedReviveThisRun = false;
 
   // Dimension & Route Selection
   private selectedStartDimensionId = 3;
@@ -159,6 +161,7 @@ export class GameEngine {
     this.saveData = initialSave;
     this.callbacks = callbacks;
     haptics.setEnabled(initialSave.settings.haptics !== false);
+    crazyGames.init();
     this.init();
   }
 
@@ -467,12 +470,16 @@ export class GameEngine {
       this.camera.position.set(3.95, 2.15, 6.1);
       audioManager.stopEngine();
     }
+    if (next === 'PAUSED' || next === 'GAME_OVER' || next === 'ROUTE_SELECTION' || next === 'MAIN_MENU') {
+      crazyGames.gameplayStop();
+    }
     if (next === 'PAUSED' || next === 'GAME_OVER') {
       audioManager.updateEngine(0, this.altitude, false);
     }
     if (next === 'GAMEPLAY' || next === 'BOSS_BATTLE') {
       audioManager.startMusic();
       audioManager.startEngine();
+      crazyGames.gameplayStart();
     }
     this.callbacks.onStateChange(next);
     this.emitHud();
@@ -519,6 +526,7 @@ export class GameEngine {
     this.magnetTimer = 0;
     this.overdriveCharge = 0;
     this.overdriveTimer = 0;
+    this.usedReviveThisRun = false;
 
     this.nextRouteDistance = PHYSICS_CONFIG.routeIntervalMeters;
     this.routeCounter = 0;
@@ -535,6 +543,26 @@ export class GameEngine {
     this._lookTarget.set(this.playerX * 0.42, this.currentAltitudeY + 0.85, -22);
     this.camera.lookAt(this._lookTarget);
     this.setState('GAMEPLAY');
+  }
+
+  hasUsedRevive(): boolean {
+    return this.usedReviveThisRun;
+  }
+
+  reviveCurrentRun(): boolean {
+    if (this.state !== 'GAME_OVER' || this.usedReviveThisRun) return false;
+    this.usedReviveThisRun = true;
+    this.hearts = Math.max(2, this.maxHearts);
+    this.invulnTimer = 3.0;
+    this.shieldTimer = Math.max(this.shieldTimer, 5.0);
+    this.hitstopTimer = 0;
+    this.cameraTrauma = 0;
+    this.world.clearDangerZoneObstacles(-52, 18);
+    audioManager.playOverdrive();
+    haptics.trigger('powerup');
+    this.pushNotification(t(this.saveData.language, 'revived_notif'), '#22d3ee');
+    this.setState('GAMEPLAY');
+    return true;
   }
 
   private clearBoss(): void {
@@ -1317,6 +1345,7 @@ export class GameEngine {
       this.cameraTrauma = 0.9;
       audioManager.playBossDefeat();
       haptics.trigger('boss_defeat');
+      crazyGames.happytime();
       this.world.spawnExplosion(this.bossX, this.currentAltitudeY + 3.2, -36, this.activeBossConfig.coreColor, 34);
       this.pushNotification(`${t(this.saveData.language, 'boss_defeated')} +${reward}`, '#facc15');
       this.clearBoss();
@@ -1327,6 +1356,10 @@ export class GameEngine {
   private finishRun(): void {
     this.clearBoss();
     audioManager.stopEngine();
+    crazyGames.gameplayStop();
+    if (this.score > this.saveData.highScore && this.score > 0) {
+      crazyGames.happytime();
+    }
     const finalStats: RunStats = {
       distance: Math.round(this.distance),
       score: Math.round(this.score),

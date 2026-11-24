@@ -1315,6 +1315,21 @@ export class WorldManager {
     }
   }
 
+  clearDangerZoneObstacles(minZ = -52, maxZ = 18): void {
+    for (const o of this.obstacles) {
+      if (o.active && o.z >= minZ && o.z <= maxZ) {
+        o.active = false;
+        o.mesh.visible = false;
+      }
+    }
+    for (const pr of this.projectiles) {
+      if (pr.active && pr.fromBoss) {
+        pr.active = false;
+        pr.mesh.visible = false;
+      }
+    }
+  }
+
   spawnExplosion(x: number, y: number, z: number, colorHex: number, count: number): void {
     for (let i = 0; i < count; i++) {
       const idx = this.particleCursor;
