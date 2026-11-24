@@ -12,11 +12,13 @@ import {
   encodeSaveBase64,
   generateBossConfig,
   getEffectiveStats,
+  getSignatureObstacleForTheme,
   getUpgradeCost,
   pickDimensionalRoutes,
   purchaseUpgrade,
   purchaseVehicle,
 } from './rules';
+import { HapticsManager } from './haptics';
 import { INITIAL_COINS } from './config';
 
 test('Vehicle Database has 200 distinct vehicles across 4 categories and 8 weapons', () => {
@@ -128,6 +130,9 @@ test('Save export/import validates schema, version, and rejects corrupted payloa
 
 test('20 Dimensions, Route Picker, Combo, Obstacle HP, and 200 Boss Configs work cleanly', () => {
   assert.equal(DIMENSIONS.length, 20);
+  const signatureHazards = new Set(DIMENSIONS.map((d) => getSignatureObstacleForTheme(d.propTheme)));
+  assert.equal(signatureHazards.size, 20);
+
   const routes = pickDimensionalRoutes(1, 3);
   assert.equal(routes.length, 3);
   assert.ok(routes.every((r) => r.dimension.id !== 1));
@@ -141,4 +146,34 @@ test('20 Dimensions, Route Picker, Combo, Obstacle HP, and 200 Boss Configs work
   const b2 = generateBossConfig(2, 10000);
   assert.notEqual(b1.name, b2.name);
   assert.ok(b2.maxHp > b1.maxHp);
+});
+
+test('Vibration API HapticsManager fires patterns with throttling and safe disabled/unsupported handling', () => {
+  const calls: Array<number | number[]> = [];
+  const mockNav = {
+    vibrate: (pattern: number | number[]) => {
+      calls.push(pattern);
+      return true;
+    },
+  };
+
+  const hm = new HapticsManager();
+  assert.equal(hm.trigger('weapon', 100, mockNav), true);
+  // Throttled within 85ms cooldown
+  assert.equal(hm.trigger('weapon', 130, mockNav), false);
+  // Allowed after cooldown
+  assert.equal(hm.trigger('weapon', 200, mockNav), true);
+
+  // Collision triggers heavy pattern immediately
+  assert.equal(hm.trigger('collision', 210, mockNav), true);
+  assert.equal(hm.trigger('powerup', 220, mockNav), true);
+
+  // Disabled state suppresses vibration
+  hm.setEnabled(false);
+  assert.equal(hm.trigger('collision', 500, mockNav), false);
+
+  // Unsupported environment returns false cleanly
+  hm.setEnabled(true);
+  assert.equal(hm.trigger('coin', 600, {}), false);
+  assert.equal(calls.length, 4);
 });

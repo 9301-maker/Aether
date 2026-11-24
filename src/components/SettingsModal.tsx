@@ -147,6 +147,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               />
               {t(lang, 'settings_autofire')}
             </label>
+            <label className="flex items-center gap-2 text-xs text-slate-200 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={save.settings.haptics !== false}
+                onChange={(e) => onUpdateSettings({ haptics: e.target.checked })}
+                className="accent-cyan-400"
+              />
+              {t(lang, 'settings_haptics')}
+            </label>
           </div>
         </div>
 

@@ -150,33 +150,38 @@ export function getTerrainTexture(maxAnisotropy: number): THREE.CanvasTexture {
   canvas.height = 512;
   const ctx = canvas.getContext('2d')!;
 
-  ctx.fillStyle = '#121a28';
+  ctx.fillStyle = '#cfcfd4';
   ctx.fillRect(0, 0, 512, 512);
 
-  // Architectural urban ground tiles & landscaped boulevard strips
-  for (let y = 0; y < 512; y += 64) {
-    for (let x = 0; x < 512; x += 64) {
-      const shade = 18 + (((x * 13 + y * 29) / 64) % 9);
-      ctx.fillStyle = `rgb(${shade},${shade + 6},${shade + 14})`;
-      ctx.fillRect(x + 2, y + 2, 60, 60);
-    }
-  }
-  ctx.strokeStyle = 'rgba(100, 116, 139, 0.14)';
-  ctx.lineWidth = 2;
-  for (let p = 0; p <= 512; p += 64) {
+  // Soft overlapping organic terrain patches (no sharp square grid)
+  for (let i = 0; i < 90; i++) {
+    const cx = (i * 137) % 512;
+    const cy = (i * 211) % 512;
+    const r = 36 + (i % 5) * 16;
+    const grad = ctx.createRadialGradient(cx, cy, 4, cx, cy, r);
+    const v = 192 + ((i * 19) % 34);
+    grad.addColorStop(0, `rgba(${v},${v},${v},0.42)`);
+    grad.addColorStop(1, `rgba(${v},${v},${v},0)`);
+    ctx.fillStyle = grad;
     ctx.beginPath();
-    ctx.moveTo(p, 0);
-    ctx.lineTo(p, 512);
-    ctx.moveTo(0, p);
-    ctx.lineTo(512, p);
-    ctx.stroke();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  // Subtle fine natural grain speckles
+  for (let i = 0; i < 900; i++) {
+    const sx = (i * 97) % 512;
+    const sy = (i * 151) % 512;
+    const sw = 2 + (i % 4);
+    const tone = i % 2 === 0 ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)';
+    ctx.fillStyle = tone;
+    ctx.fillRect(sx, sy, sw, sw);
   }
 
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.wrapS = THREE.RepeatWrapping;
   tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(12, 4);
+  tex.repeat.set(14, 5);
   tex.anisotropy = Math.max(1, maxAnisotropy);
   cachedTerrainTex = tex;
   return tex;

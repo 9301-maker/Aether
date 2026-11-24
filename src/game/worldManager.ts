@@ -1,7 +1,16 @@
 import * as THREE from 'three';
 import { ALTITUDE_HEIGHTS, LANE_POSITIONS, PHYSICS_CONFIG } from './config';
-import { calculateObstacleHP } from './rules';
-import { AltitudeLayer, DimensionConfig } from './types';
+import { calculateObstacleHP, getSignatureObstacleForTheme } from './rules';
+import { AltitudeLayer, DimensionConfig, ObstacleKind } from './types';
+import {
+  buildThemeChunkProps,
+  BuiltThemeChunk,
+  PropTheme,
+} from './biomeBuilder';
+import {
+  getOrBuildSignatureHazardGroup,
+  updateSignatureHazardAnimation,
+} from './hazardBuilder';
 import {
   getBuildingEmissiveTexture,
   getBuildingWindowTexture,
@@ -12,59 +21,9 @@ import {
   getTerrainTexture,
 } from './vehicleBuilder';
 
-export type ObstacleKind =
-  | 'ROAD_BARRIER'
-  | 'ENERGY_CRATE'
-  | 'TRAFFIC_VEHICLE'
-  | 'LASER_GATE'
-  | 'HEAVY_BLOCK'
-  | 'MOVING_OBSTACLE'
-  | 'ENEMY_AIRCRAFT'
-  | 'ASTEROID'
-  | 'VOLCANIC_ROCK'
-  | 'QUANTUM_RIFT';
+export type { ObstacleKind };
 
 export type PowerUpKind = 'HEART' | 'SHIELD' | 'MAGNET';
-
-export type BiomeKind =
-  | 'urban'
-  | 'volcanic'
-  | 'quantum'
-  | 'crystal'
-  | 'ancient'
-  | 'nature'
-  | 'industrial';
-
-export function getBiomeForTheme(theme: DimensionConfig['propTheme']): BiomeKind {
-  switch (theme) {
-    case 'volcanic':
-    case 'solar':
-      return 'volcanic';
-    case 'quantum':
-    case 'magnetic':
-    case 'storm':
-    case 'eternal':
-      return 'quantum';
-    case 'crystal':
-    case 'glacier':
-    case 'citadel':
-      return 'crystal';
-    case 'pyramid':
-    case 'ruins':
-      return 'ancient';
-    case 'forest':
-    case 'sakura':
-    case 'toxic':
-    case 'ocean':
-      return 'nature';
-    case 'machine':
-    case 'lunar':
-    case 'nebula':
-      return 'industrial';
-    default:
-      return 'urban';
-  }
-}
 
 export interface PooledObstacle {
   active: boolean;
@@ -74,6 +33,8 @@ export interface PooledObstacle {
   x: number;
   y: number;
   z: number;
+  visualX: number;
+  visualY: number;
   hp: number;
   maxHp: number;
   destructible: boolean;
@@ -89,6 +50,7 @@ export interface PooledObstacle {
   eruptTargetX: number;
   eruptTargetY: number;
   mesh: THREE.Group;
+  hazardGroups: Map<ObstacleKind, THREE.Group>;
   flashMaterials: THREE.MeshStandardMaterial[];
   hpBarBg: THREE.Mesh;
   hpBarFill: THREE.Mesh;
@@ -148,25 +110,16 @@ interface ParticleState {
 
 interface WorldChunk {
   group: THREE.Group;
+  chunkIdx: number;
   zCenter: number;
   groundBaseGroup: THREE.Group;
+  urbanRailsGroup: THREE.Group;
   roadCrackGroup: THREE.Group;
-  groundBiomes: Record<BiomeKind, THREE.Group>;
   skyBaseGroup: THREE.Group;
-  skyBiomes: Record<BiomeKind, THREE.Group>;
   spaceBaseGroup: THREE.Group;
-  spaceBiomes: Record<BiomeKind, THREE.Group>;
+  themeCache: Map<PropTheme, BuiltThemeChunk>;
+  activeBuilt: BuiltThemeChunk | null;
 }
-
-const ALL_BIOMES: BiomeKind[] = [
-  'urban',
-  'volcanic',
-  'quantum',
-  'crystal',
-  'ancient',
-  'nature',
-  'industrial',
-];
 
 export class WorldManager {
   private scene: THREE.Scene;
@@ -198,19 +151,10 @@ export class WorldManager {
   private steelMat: THREE.MeshStandardMaterial;
   private buildingMat: THREE.MeshStandardMaterial;
   private terrainMat: THREE.MeshStandardMaterial;
-  private foliageMat: THREE.MeshStandardMaterial;
   private cloudMat: THREE.MeshStandardMaterial;
-
-  // Biome-specific materials
   private fissureMat: THREE.MeshStandardMaterial;
-  private volcanoRockMat: THREE.MeshStandardMaterial;
-  private magmaMat: THREE.MeshStandardMaterial;
-  private quantumGlowMat: THREE.MeshStandardMaterial;
-  private crystalMat: THREE.MeshPhysicalMaterial;
-  private sandstoneMat: THREE.MeshStandardMaterial;
-  private natureBlossomMat: THREE.MeshStandardMaterial;
 
-  private activeBiome: BiomeKind = 'urban';
+  private activeTheme: PropTheme = 'cyber';
   private activeAltitude: AltitudeLayer = 'GROUND';
   private activeIsGarage = false;
 
@@ -288,11 +232,6 @@ export class WorldManager {
       metalness: 0.08,
       envMapIntensity: 0.25,
     });
-    this.foliageMat = new THREE.MeshStandardMaterial({
-      color: 0x16382c,
-      roughness: 0.88,
-      metalness: 0.04,
-    });
     // Soft twilight atmospheric clouds (never bright white glaring!)
     this.cloudMat = new THREE.MeshStandardMaterial({
       color: 0x384b68,
@@ -308,42 +247,6 @@ export class WorldManager {
       emissive: 0xc2410c,
       emissiveIntensity: 0.68,
       roughness: 0.35,
-    });
-    this.volcanoRockMat = new THREE.MeshStandardMaterial({
-      color: 0x261d1c,
-      roughness: 0.92,
-      metalness: 0.08,
-    });
-    this.magmaMat = new THREE.MeshStandardMaterial({
-      color: 0xf97316,
-      emissive: 0xea580c,
-      emissiveIntensity: 0.95,
-      roughness: 0.35,
-    });
-    this.quantumGlowMat = new THREE.MeshStandardMaterial({
-      color: 0x38bdf8,
-      emissive: 0x7c3aed,
-      emissiveIntensity: 0.82,
-      roughness: 0.25,
-    });
-    this.crystalMat = new THREE.MeshPhysicalMaterial({
-      color: 0x7dd3fc,
-      emissive: 0x0284c7,
-      emissiveIntensity: 0.32,
-      roughness: 0.14,
-      metalness: 0.25,
-      clearcoat: 0.9,
-      envMapIntensity: 0.85,
-    });
-    this.sandstoneMat = new THREE.MeshStandardMaterial({
-      color: 0x8c6d46,
-      roughness: 0.88,
-      metalness: 0.06,
-    });
-    this.natureBlossomMat = new THREE.MeshStandardMaterial({
-      color: 0xb94a72,
-      roughness: 0.78,
-      metalness: 0.05,
     });
 
     this.initSkyDome();
@@ -488,378 +391,6 @@ export class WorldManager {
     this.scene.add(dome);
   }
 
-  private createBiomeRecord(): Record<BiomeKind, THREE.Group> {
-    return {
-      urban: new THREE.Group(),
-      volcanic: new THREE.Group(),
-      quantum: new THREE.Group(),
-      crystal: new THREE.Group(),
-      ancient: new THREE.Group(),
-      nature: new THREE.Group(),
-      industrial: new THREE.Group(),
-    };
-  }
-
-  private populateGroundBiomes(chunkIdx: number, len: number, biomes: Record<BiomeKind, THREE.Group>): void {
-    // 1. URBAN METROPOLIS: Glass skyscrapers + overhead steel highway gantries + evergreen conifers
-    const urban = biomes.urban;
-    for (let tIdx = -1; tIdx <= 1; tIdx += 2) {
-      for (const side of [-1, 1]) {
-        const tz = tIdx * 13;
-        const tx = side * 9.0;
-        const planter = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.62, 0.35, 10), this.curbMat);
-        planter.position.set(tx, 0.22, tz);
-        const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.12, 1.15, 8), this.propMat);
-        trunk.position.set(tx, 0.85, tz);
-        const tier1 = new THREE.Mesh(new THREE.ConeGeometry(0.85, 1.5, 9), this.foliageMat);
-        tier1.position.set(tx, 1.85, tz);
-        const tier2 = new THREE.Mesh(new THREE.ConeGeometry(0.65, 1.35, 9), this.foliageMat);
-        tier2.position.set(tx, 2.65, tz);
-        const tier3 = new THREE.Mesh(new THREE.ConeGeometry(0.42, 1.1, 9), this.foliageMat);
-        tier3.position.set(tx, 3.35, tz);
-        urban.add(planter, trunk, tier1, tier2, tier3);
-      }
-    }
-    for (let p = 0; p < 6; p++) {
-      const side = p % 2 === 0 ? -1 : 1;
-      const row = Math.floor(p / 2);
-      const isOuter = row === 2;
-      const h = isOuter ? 22 + ((chunkIdx * 7 + p * 5) % 24) : 13 + ((chunkIdx * 5 + p * 7) % 18);
-      const w = isOuter ? 5.2 + (p % 2) * 1.8 : 3.8 + ((p + chunkIdx) % 3) * 1.1;
-      const bz = (row - 1) * 17 + (side > 0 ? 4 : -4);
-      const bx = side * (isOuter ? 24.5 + (chunkIdx % 2) * 3.5 : 13.6 + (p % 2) * 2.4);
-
-      const podium = new THREE.Mesh(new THREE.BoxGeometry(w * 1.2, 2.8, 5.2), this.propMat);
-      podium.position.set(bx, 1.35, bz);
-      const bldg = new THREE.Mesh(new THREE.BoxGeometry(w, h, 4.6), this.buildingMat);
-      bldg.position.set(bx, h * 0.5 + 1.4, bz);
-      const tierH = 3.2 + (p % 3) * 1.5;
-      const tier = new THREE.Mesh(new THREE.BoxGeometry(w * 0.74, tierH, 3.4), this.buildingMat);
-      tier.position.set(bx, h + 1.4 + tierH * 0.5, bz);
-      const crownRim = new THREE.Mesh(new THREE.BoxGeometry(w * 0.76, 0.14, 3.5), this.accentBeaconMat);
-      crownRim.position.set(bx, h + 1.4 + tierH, bz);
-      const spire = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.13, 3.4, 8), this.steelMat);
-      spire.position.set(bx, h + 1.4 + tierH + 1.7, bz);
-      const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.14, 8, 6), this.accentBeaconMat);
-      beacon.position.set(bx, h + 1.4 + tierH + 3.4, bz);
-      urban.add(podium, bldg, tier, crownRim, spire, beacon);
-    }
-    if (chunkIdx % 2 === 0) {
-      const colL = new THREE.Mesh(new THREE.BoxGeometry(0.32, 7.2, 0.42), this.steelMat);
-      colL.position.set(-7.7, 3.6, -len * 0.25);
-      const colR = colL.clone();
-      colR.position.x = 7.7;
-      const truss = new THREE.Mesh(new THREE.BoxGeometry(15.8, 0.48, 0.52), this.steelMat);
-      truss.position.set(0, 7.1, -len * 0.25);
-      const signBoard = new THREE.Mesh(new THREE.BoxGeometry(6.4, 0.95, 0.16), this.propMat);
-      signBoard.position.set(0, 6.95, -len * 0.25 + 0.3);
-      const signTrim = new THREE.Mesh(new THREE.BoxGeometry(6.2, 0.08, 0.18), this.accentBeaconMat);
-      signTrim.position.set(0, 6.52, -len * 0.25 + 0.31);
-      urban.add(colL, colR, truss, signBoard, signTrim);
-    }
-
-    // 2. VOLCANIC: Sculpted Volcano Cones with recessed glowing magma craters, lava flows & obsidian spires
-    const volcanic = biomes.volcanic;
-    for (let v = 0; v < 2; v++) {
-      const side = v === 0 ? -1 : 1;
-      const vx = side * (17.5 + ((chunkIdx + v) % 2) * 3.5);
-      const vz = (v - 0.5) * 26;
-      const vh = 13 + ((chunkIdx * 5 + v * 7) % 8);
-      const vRad = 9.5 + (v % 2) * 2.2;
-
-      // Truncated volcano mountain cone
-      const cone = new THREE.Mesh(new THREE.CylinderGeometry(2.6, vRad, vh, 11), this.volcanoRockMat);
-      cone.position.set(vx, vh * 0.5 - 0.2, vz);
-
-      // Crater rim collar & recessed molten lava pool
-      const craterRim = new THREE.Mesh(new THREE.TorusGeometry(2.45, 0.55, 8, 14), this.volcanoRockMat);
-      craterRim.rotation.x = Math.PI / 2;
-      craterRim.position.set(vx, vh - 0.1, vz);
-      const magmaPool = new THREE.Mesh(new THREE.CylinderGeometry(2.1, 2.1, 0.3, 12), this.magmaMat);
-      magmaPool.position.set(vx, vh - 0.25, vz);
-
-      // Glowing lava fissure river hugging volcano slope from crater rim down to base
-      const topR = 2.5;
-      const xTop = vx - side * (topR * 0.92);
-      const yTop = vh - 0.35;
-      const xBot = vx - side * (vRad * 0.94);
-      const yBot = 0.2;
-      const ldx = xTop - xBot;
-      const ldy = yTop - yBot;
-      const riverLen = Math.hypot(ldx, ldy) * 0.92;
-      const lavaRiver = new THREE.Mesh(new THREE.BoxGeometry(0.42, riverLen, 0.9), this.magmaMat);
-      lavaRiver.position.set((xTop + xBot) * 0.5, (yTop + yBot) * 0.5, vz + 0.15);
-      lavaRiver.rotation.z = -Math.atan2(ldx, ldy);
-
-      volcanic.add(cone, craterRim, magmaPool, lavaRiver);
-    }
-    // Jagged basalt pillars along road shoulders
-    for (let b = 0; b < 4; b++) {
-      const side = b % 2 === 0 ? -1 : 1;
-      const spire = new THREE.Mesh(
-        new THREE.ConeGeometry(1.1 + (b % 2) * 0.4, 4.2 + (b % 3) * 1.6, 5),
-        this.volcanoRockMat
-      );
-      spire.position.set(side * (9.5 + (b % 2) * 1.4), 2.0, (b - 1.5) * 14);
-      volcanic.add(spire);
-    }
-
-    // 3. QUANTUM RIFT: Levitating fractured monoliths & tilted Dimensional Portal Arches
-    const quantum = biomes.quantum;
-    for (let q = 0; q < 4; q++) {
-      const side = q % 2 === 0 ? -1 : 1;
-      const qx = side * (12.2 + (q % 2) * 3.8);
-      const qz = (q - 1.5) * 14;
-      const baseMonolith = new THREE.Mesh(new THREE.BoxGeometry(1.8, 7.5 + (q % 3) * 2.5, 1.8), this.propMat);
-      baseMonolith.position.set(qx, 4.2, qz);
-      baseMonolith.rotation.z = side * 0.08;
-      const shardFloat = new THREE.Mesh(new THREE.OctahedronGeometry(1.5, 0), this.quantumGlowMat);
-      shardFloat.scale.set(0.8, 1.8, 0.8);
-      shardFloat.position.set(qx, 10.5 + (q % 2) * 2.2, qz);
-      const riftRing = new THREE.Mesh(new THREE.TorusGeometry(2.3, 0.14, 8, 20), this.quantumGlowMat);
-      riftRing.position.set(qx, 9.8, qz);
-      riftRing.rotation.set(0.35, side * 0.5, 0.25);
-      quantum.add(baseMonolith, shardFloat, riftRing);
-    }
-    // Dimensional Portal Gate spanning over highway every alternate chunk
-    if (chunkIdx % 2 === 0) {
-      const archRing = new THREE.Mesh(new THREE.TorusGeometry(8.2, 0.26, 8, 28, Math.PI), this.quantumGlowMat);
-      archRing.position.set(0, 0.2, -len * 0.2);
-      const innerArc = new THREE.Mesh(new THREE.TorusGeometry(7.6, 0.12, 8, 28, Math.PI), this.accentBeaconMat);
-      innerArc.position.set(0, 0.2, -len * 0.2);
-      quantum.add(archRing, innerArc);
-    }
-
-    // 4. CRYSTAL / GLACIER: Clustered giant translucent crystal spires & ice arches
-    const crystal = biomes.crystal;
-    for (let c = 0; c < 6; c++) {
-      const side = c % 2 === 0 ? -1 : 1;
-      const cx = side * (11.2 + (c % 3) * 3.2);
-      const cz = (c - 2.5) * 10;
-      const ch = 6.5 + ((chunkIdx + c * 3) % 10);
-      const shard = new THREE.Mesh(new THREE.ConeGeometry(1.4 + (c % 2) * 0.6, ch, 6), this.crystalMat);
-      shard.position.set(cx, ch * 0.45, cz);
-      shard.rotation.z = side * (0.14 + (c % 2) * 0.12);
-      const subShard = new THREE.Mesh(new THREE.ConeGeometry(0.95, ch * 0.6, 5), this.crystalMat);
-      subShard.position.set(cx - side * 1.1, ch * 0.25, cz + 0.8);
-      subShard.rotation.z = side * 0.34;
-      crystal.add(shard, subShard);
-    }
-
-    // 5. ANCIENT / PYRAMID: Stepped Pyramids & Weathered Obelisks/Columns
-    const ancient = biomes.ancient;
-    for (let a = 0; a < 2; a++) {
-      const side = a === 0 ? -1 : 1;
-      const ax = side * 19.5;
-      const az = (a - 0.5) * 28;
-      const pyr = new THREE.Mesh(new THREE.ConeGeometry(8.8, 12.5, 4), this.sandstoneMat);
-      pyr.rotation.y = Math.PI / 4;
-      pyr.position.set(ax, 6.0, az);
-      ancient.add(pyr);
-    }
-    for (let col = 0; col < 4; col++) {
-      const side = col % 2 === 0 ? -1 : 1;
-      const cz = (col - 1.5) * 14;
-      const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.72, 6.2, 8), this.sandstoneMat);
-      pillar.position.set(side * 9.8, 3.1, cz);
-      const cap = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.45, 1.6), this.sandstoneMat);
-      cap.position.set(side * 9.8, 6.3, cz);
-      ancient.add(pillar, cap);
-    }
-
-    // 6. NATURE / SAKURA / FOREST / OCEAN: Torii Gates & Blossom/Canopy Trees
-    const nature = biomes.nature;
-    for (let n = 0; n < 4; n++) {
-      const side = n % 2 === 0 ? -1 : 1;
-      const nx = side * (10.5 + (n % 2) * 3.5);
-      const nz = (n - 1.5) * 14;
-      const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.38, 4.2, 8), this.propMat);
-      trunk.position.set(nx, 2.1, nz);
-      const crown1 = new THREE.Mesh(new THREE.DodecahedronGeometry(2.1, 1), this.natureBlossomMat);
-      crown1.scale.set(1.3, 0.72, 1.3);
-      crown1.position.set(nx, 4.5, nz);
-      const crown2 = new THREE.Mesh(new THREE.DodecahedronGeometry(1.5, 1), this.natureBlossomMat);
-      crown2.scale.set(1.2, 0.68, 1.2);
-      crown2.position.set(nx - side * 0.8, 5.4, nz + 0.5);
-      nature.add(trunk, crown1, crown2);
-    }
-    if (chunkIdx % 2 === 0) {
-      // Iconic Torii / Canopy Arch spanning the road
-      const postL = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.38, 7.6, 10), this.natureBlossomMat);
-      postL.position.set(-7.6, 3.8, -len * 0.2);
-      const postR = postL.clone();
-      postR.position.x = 7.6;
-      const lintelTop = new THREE.Mesh(new THREE.BoxGeometry(17.6, 0.55, 0.72), this.natureBlossomMat);
-      lintelTop.position.set(0, 7.6, -len * 0.2);
-      const lintelLow = new THREE.Mesh(new THREE.BoxGeometry(15.8, 0.38, 0.48), this.propMat);
-      lintelLow.position.set(0, 6.4, -len * 0.2);
-      nature.add(postL, postR, lintelTop, lintelLow);
-    }
-
-    // 7. INDUSTRIAL / MACHINE / LUNAR: Gear Towers & Radar Domes
-    const industrial = biomes.industrial;
-    for (let m = 0; m < 4; m++) {
-      const side = m % 2 === 0 ? -1 : 1;
-      const mx = side * (12.8 + (m % 2) * 4.5);
-      const mz = (m - 1.5) * 14;
-      const tower = new THREE.Mesh(new THREE.CylinderGeometry(1.4, 2.1, 10.5, 8), this.steelMat);
-      tower.position.set(mx, 5.2, mz);
-      const gearRing = new THREE.Mesh(new THREE.TorusGeometry(2.3, 0.35, 8, 12), this.propMat);
-      gearRing.position.set(mx, 8.2, mz);
-      const dish = new THREE.Mesh(new THREE.SphereGeometry(1.6, 12, 8, 0, Math.PI * 2, 0, Math.PI * 0.5), this.steelMat);
-      dish.position.set(mx, 10.6, mz);
-      industrial.add(tower, gearRing, dish);
-    }
-  }
-
-  private populateSkyBiomes(chunkIdx: number, biomes: Record<BiomeKind, THREE.Group>): void {
-    const skyY = ALTITUDE_HEIGHTS.SKY;
-
-    // Urban sky: sleek skyway beacons
-    for (let i = 0; i < 2; i++) {
-      const side = i === 0 ? -1 : 1;
-      const buoy = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.55, 4.2, 8), this.steelMat);
-      buoy.position.set(side * 9.8, skyY + 1.5, (i - 0.5) * 26);
-      const cap = new THREE.Mesh(new THREE.SphereGeometry(0.45, 8, 6), this.accentBeaconMat);
-      cap.position.set(side * 9.8, skyY + 3.8, (i - 0.5) * 26);
-      biomes.urban.add(buoy, cap);
-    }
-
-    // Volcanic sky: towering ash & glowing ember plumes rising from below + floating volcanic rocks
-    for (let i = 0; i < 3; i++) {
-      const side = i % 2 === 0 ? -1 : 1;
-      const ashCol = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 2.8, 18, 10), this.volcanoRockMat);
-      ashCol.position.set(side * (13.5 + i * 2), skyY - 3, (i - 1) * 18);
-      const magmaCloud = new THREE.Mesh(new THREE.DodecahedronGeometry(2.2, 1), this.magmaMat);
-      magmaCloud.position.set(side * 12, skyY + 3.5, (i - 1) * 18);
-      biomes.volcanic.add(ashCol, magmaCloud);
-    }
-
-    // Quantum sky: tilted dimensional rift rings & floating fracture shards
-    for (let i = 0; i < 3; i++) {
-      const side = i % 2 === 0 ? -1 : 1;
-      const qRing = new THREE.Mesh(new THREE.TorusGeometry(3.4, 0.22, 8, 22), this.quantumGlowMat);
-      qRing.position.set(side * 11.5, skyY + 1.5, (i - 1) * 18);
-      qRing.rotation.set(0.4, side * 0.7, 0.3);
-      const shard = new THREE.Mesh(new THREE.OctahedronGeometry(1.4, 0), this.quantumGlowMat);
-      shard.scale.set(0.6, 1.9, 0.6);
-      shard.position.set(side * 11.5, skyY + 1.5, (i - 1) * 18);
-      biomes.quantum.add(qRing, shard);
-    }
-    if (chunkIdx % 2 === 0) {
-      const skyPortal = new THREE.Mesh(new THREE.TorusGeometry(7.8, 0.2, 8, 28, Math.PI), this.quantumGlowMat);
-      skyPortal.position.set(0, skyY - 0.5, 0);
-      biomes.quantum.add(skyPortal);
-    }
-
-    // Crystal sky: levitating crystalline sky spires
-    for (let i = 0; i < 3; i++) {
-      const side = i % 2 === 0 ? -1 : 1;
-      const spire = new THREE.Mesh(new THREE.OctahedronGeometry(2.1, 0), this.crystalMat);
-      spire.scale.set(0.75, 2.2, 0.75);
-      spire.position.set(side * 12.2, skyY + 1.2, (i - 1) * 18);
-      biomes.crystal.add(spire);
-    }
-
-    // Ancient sky: floating stone temple pillars & sun rings
-    for (let i = 0; i < 2; i++) {
-      const side = i === 0 ? -1 : 1;
-      const obelisk = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.95, 7.2, 4), this.sandstoneMat);
-      obelisk.position.set(side * 11.5, skyY + 1.0, (i - 0.5) * 24);
-      biomes.ancient.add(obelisk);
-    }
-
-    // Nature sky: floating sky islands topped with blossom/canopy foliage
-    for (let i = 0; i < 2; i++) {
-      const side = i === 0 ? -1 : 1;
-      const ix = side * 13.5;
-      const iz = (i - 0.5) * 25;
-      const island = new THREE.Mesh(new THREE.ConeGeometry(3.4, 4.2, 7), this.propMat);
-      island.rotation.x = Math.PI;
-      island.position.set(ix, skyY - 2.2, iz);
-      const tree = new THREE.Mesh(new THREE.DodecahedronGeometry(2.1, 1), this.natureBlossomMat);
-      tree.scale.set(1.3, 0.75, 1.3);
-      tree.position.set(ix, skyY + 0.8, iz);
-      biomes.nature.add(island, tree);
-    }
-
-    // Industrial sky: floating turbine sky-derricks
-    for (let i = 0; i < 2; i++) {
-      const side = i === 0 ? -1 : 1;
-      const body = new THREE.Mesh(new THREE.BoxGeometry(2.4, 3.2, 2.4), this.steelMat);
-      body.position.set(side * 11.5, skyY + 1.0, (i - 0.5) * 25);
-      const rotor = new THREE.Mesh(new THREE.TorusGeometry(2.2, 0.24, 8, 16), this.propMat);
-      rotor.rotation.x = Math.PI / 2;
-      rotor.position.set(side * 11.5, skyY + 3.0, (i - 0.5) * 25);
-      biomes.industrial.add(body, rotor);
-    }
-  }
-
-  private populateSpaceBiomes(biomes: Record<BiomeKind, THREE.Group>): void {
-    const spY = ALTITUDE_HEIGHTS.SPACE;
-
-    // Urban space: satellite pylons
-    for (let s = 0; s < 2; s++) {
-      const side = s === 0 ? -1 : 1;
-      const sat = new THREE.Mesh(new THREE.BoxGeometry(1.6, 1.6, 2.4), this.steelMat);
-      sat.position.set(side * 13.5, spY + 2.5, (s - 0.5) * 24);
-      const panel = new THREE.Mesh(new THREE.BoxGeometry(5.2, 0.1, 1.4), this.accentBeaconMat);
-      panel.position.copy(sat.position);
-      biomes.urban.add(sat, panel);
-    }
-
-    // Volcanic space: molten magma meteors
-    for (let s = 0; s < 3; s++) {
-      const side = s % 2 === 0 ? -1 : 1;
-      const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(2.6, 1), this.volcanoRockMat);
-      rock.position.set(side * (14 + s * 2), spY + (s - 1) * 3, (s - 1) * 18);
-      const core = new THREE.Mesh(new THREE.OctahedronGeometry(2.2, 0), this.magmaMat);
-      core.position.copy(rock.position);
-      biomes.volcanic.add(rock, core);
-    }
-
-    // Quantum space: giant tilted warp gates
-    for (let s = 0; s < 2; s++) {
-      const ring = new THREE.Mesh(new THREE.TorusGeometry(7.5, 0.25, 8, 28), this.quantumGlowMat);
-      ring.position.set(0, spY + 1.5, (s - 0.5) * 28);
-      ring.rotation.z = s * 0.4;
-      biomes.quantum.add(ring);
-    }
-
-    // Crystal space: prism asteroids
-    for (let s = 0; s < 3; s++) {
-      const side = s % 2 === 0 ? -1 : 1;
-      const c = new THREE.Mesh(new THREE.OctahedronGeometry(2.5, 0), this.crystalMat);
-      c.scale.set(0.8, 1.9, 0.8);
-      c.position.set(side * 14, spY + (s - 1) * 3, (s - 1) * 18);
-      biomes.crystal.add(c);
-    }
-
-    // Ancient space: orbital stone monoliths
-    for (let s = 0; s < 2; s++) {
-      const side = s === 0 ? -1 : 1;
-      const ob = new THREE.Mesh(new THREE.CylinderGeometry(0.8, 1.3, 8.2, 4), this.sandstoneMat);
-      ob.position.set(side * 13.5, spY + 1.5, (s - 0.5) * 26);
-      ob.rotation.z = side * 0.22;
-      biomes.ancient.add(ob);
-    }
-
-    // Nature space: glowing bio-nebula clusters
-    for (let s = 0; s < 3; s++) {
-      const side = s % 2 === 0 ? -1 : 1;
-      const bio = new THREE.Mesh(new THREE.DodecahedronGeometry(2.5, 1), this.natureBlossomMat);
-      bio.position.set(side * 14, spY + (s - 1) * 3, (s - 1) * 18);
-      biomes.nature.add(bio);
-    }
-
-    // Industrial space: steel truss orbital rings
-    for (let s = 0; s < 2; s++) {
-      const ring = new THREE.Mesh(new THREE.TorusGeometry(8.2, 0.35, 8, 16), this.steelMat);
-      ring.position.set(0, spY + 1.5, (s - 0.5) * 28);
-      biomes.industrial.add(ring);
-    }
-  }
-
   private initChunks(): void {
     const len = PHYSICS_CONFIG.chunkLength;
     const roadGeo = new THREE.PlaneGeometry(13.2, len);
@@ -891,17 +422,19 @@ export class WorldManager {
       curbR.position.set(6.8, 0.11, 0);
       groundBaseGroup.add(curbL, curbR);
 
+      // Urban-only roadside infrastructure (sidewalks, steel guardrails, streetlamp poles)
+      const urbanRailsGroup = new THREE.Group();
       const walkL = new THREE.Mesh(sidewalkGeo, this.curbMat);
       walkL.position.set(-8.4, 0.04, 0);
       const walkR = new THREE.Mesh(sidewalkGeo, this.curbMat);
       walkR.position.set(8.4, 0.04, 0);
-      groundBaseGroup.add(walkL, walkR);
+      urbanRailsGroup.add(walkL, walkR);
 
       const guardL = new THREE.Mesh(guardRailGeo, this.steelMat);
       guardL.position.set(-7.15, 0.52, 0);
       const guardR = new THREE.Mesh(guardRailGeo, this.steelMat);
       guardR.position.set(7.15, 0.52, 0);
-      groundBaseGroup.add(guardL, guardR);
+      urbanRailsGroup.add(guardL, guardR);
 
       for (let gz = -len * 0.4; gz <= len * 0.4; gz += 12) {
         for (const side of [-1, 1]) {
@@ -909,16 +442,9 @@ export class WorldManager {
           post.position.set(side * 7.22, 0.29, gz);
           const stud = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.06, 0.18), this.accentBeaconMat);
           stud.position.set(side * 6.55, 0.06, gz);
-          groundBaseGroup.add(post, stud);
+          urbanRailsGroup.add(post, stud);
         }
       }
-
-      const terrainGeo = new THREE.PlaneGeometry(240, len);
-      terrainGeo.rotateX(-Math.PI / 2);
-      const terrain = new THREE.Mesh(terrainGeo, this.terrainMat);
-      terrain.position.y = -0.04;
-      terrain.receiveShadow = true;
-      groundBaseGroup.add(terrain);
 
       for (const l of [-1, 1]) {
         const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.11, 5.4, 8), this.steelMat);
@@ -927,27 +453,40 @@ export class WorldManager {
         arm.position.set(l * 6.85, 5.35, len * 0.18);
         const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.07, 0.18), this.accentBeaconMat);
         lamp.position.set(l * 6.55, 5.29, len * 0.18);
-        groundBaseGroup.add(pole, arm, lamp);
+        urbanRailsGroup.add(pole, arm, lamp);
       }
+      groundBaseGroup.add(urbanRailsGroup);
 
-      // Road Fissure Cracks / Quantum Rift Seams across the asphalt
+      const terrainGeo = new THREE.PlaneGeometry(240, len);
+      terrainGeo.rotateX(-Math.PI / 2);
+      const terrain = new THREE.Mesh(terrainGeo, this.terrainMat);
+      terrain.position.y = -0.04;
+      terrain.receiveShadow = true;
+      groundBaseGroup.add(terrain);
+
+      // Jagged dark-rimmed Road Fissure Cracks / Quantum Rift Seams across the asphalt
       const roadCrackGroup = new THREE.Group();
+      const crackVoidMat = new THREE.MeshBasicMaterial({ color: 0x05070c });
       for (let c = 0; c < 3; c++) {
         const cz = (c - 1) * 18;
-        const crack1 = new THREE.Mesh(new THREE.BoxGeometry(4.2, 0.025, 0.24), this.fissureMat);
-        crack1.position.set((c % 2 === 0 ? -1 : 1) * 2.1, 0.02, cz);
-        crack1.rotation.y = (c % 2 === 0 ? 1 : -1) * 0.42;
-        const crack2 = new THREE.Mesh(new THREE.BoxGeometry(2.8, 0.025, 0.18), this.fissureMat);
-        crack2.position.set((c % 2 === 0 ? 1 : -1) * 0.4, 0.02, cz + 1.2);
-        crack2.rotation.y = (c % 2 === 0 ? -1 : 1) * 0.55;
-        roadCrackGroup.add(crack1, crack2);
+        const dir = c % 2 === 0 ? 1 : -1;
+        const segments: [number, number, number, number][] = [
+          [dir * -3.4, cz - 0.5, 2.2, dir * 0.36],
+          [dir * -1.4, cz + 0.05, 2.5, dir * -0.45],
+          [dir * 0.9, cz - 0.3, 2.4, dir * 0.52],
+          [dir * 3.0, cz + 0.2, 2.0, dir * -0.3],
+        ];
+        for (const [sx, sz, slen, srot] of segments) {
+          const rim = new THREE.Mesh(new THREE.BoxGeometry(slen + 0.25, 0.015, 0.34), crackVoidMat);
+          rim.position.set(sx, 0.014, sz);
+          rim.rotation.y = srot;
+          const core = new THREE.Mesh(new THREE.BoxGeometry(slen, 0.022, 0.14), this.fissureMat);
+          core.position.set(sx, 0.022, sz);
+          core.rotation.y = srot;
+          roadCrackGroup.add(rim, core);
+        }
       }
       groundBaseGroup.add(roadCrackGroup);
-
-      // Ground Biomes
-      const groundBiomes = this.createBiomeRecord();
-      this.populateGroundBiomes(i, len, groundBiomes);
-      for (const b of ALL_BIOMES) groundBaseGroup.add(groundBiomes[b]);
 
       // --- SKY BASE GROUP ---
       const skyBaseGroup = new THREE.Group();
@@ -976,10 +515,6 @@ export class WorldManager {
         skyBaseGroup.add(cloud);
       }
 
-      const skyBiomes = this.createBiomeRecord();
-      this.populateSkyBiomes(i, skyBiomes);
-      for (const b of ALL_BIOMES) skyBaseGroup.add(skyBiomes[b]);
-
       // --- SPACE BASE GROUP ---
       const spaceBaseGroup = new THREE.Group();
       group.add(spaceBaseGroup);
@@ -990,21 +525,18 @@ export class WorldManager {
         spaceBaseGroup.add(rail);
       }
 
-      const spaceBiomes = this.createBiomeRecord();
-      this.populateSpaceBiomes(spaceBiomes);
-      for (const b of ALL_BIOMES) spaceBaseGroup.add(spaceBiomes[b]);
-
       this.scene.add(group);
       this.chunks.push({
         group,
+        chunkIdx: i,
         zCenter,
         groundBaseGroup,
+        urbanRailsGroup,
         roadCrackGroup,
-        groundBiomes,
         skyBaseGroup,
-        skyBiomes,
         spaceBaseGroup,
-        spaceBiomes,
+        themeCache: new Map<PropTheme, BuiltThemeChunk>(),
+        activeBuilt: null,
       });
     }
   }
@@ -1487,6 +1019,8 @@ export class WorldManager {
         x: 0,
         y: 0,
         z: 0,
+        visualX: 0,
+        visualY: 0,
         hp: 100,
         maxHp: 100,
         destructible: true,
@@ -1502,6 +1036,7 @@ export class WorldManager {
         eruptTargetX: 0,
         eruptTargetY: 0,
         mesh,
+        hazardGroups: new Map<ObstacleKind, THREE.Group>(),
         flashMaterials,
         hpBarBg,
         hpBarFill,
@@ -1618,44 +1153,70 @@ export class WorldManager {
     }
   }
 
+  private ensureThemeBuiltForChunk(ch: WorldChunk, theme: PropTheme): BuiltThemeChunk {
+    let built = ch.themeCache.get(theme);
+    if (!built) {
+      built = buildThemeChunkProps(theme, ch.chunkIdx, PHYSICS_CONFIG.chunkLength, {
+        propMat: this.propMat,
+        steelMat: this.steelMat,
+        buildingMat: this.buildingMat,
+        curbMat: this.curbMat,
+        accentBeaconMat: this.accentBeaconMat,
+        fissureMat: this.fissureMat,
+      });
+      ch.themeCache.set(theme, built);
+      ch.groundBaseGroup.add(built.ground, built.roadOverlay);
+      ch.skyBaseGroup.add(built.sky);
+      ch.spaceBaseGroup.add(built.space);
+    }
+    return built;
+  }
+
   private syncBiomeAndLayerVisibility(): void {
     const showGround = this.activeAltitude === 'GROUND' || this.activeIsGarage;
     const showSky = !this.activeIsGarage && this.activeAltitude === 'SKY';
     const showSpace = !this.activeIsGarage && this.activeAltitude === 'SPACE';
-    const showCracks =
-      this.activeBiome === 'volcanic' ||
-      this.activeBiome === 'quantum' ||
-      this.activeBiome === 'crystal' ||
-      this.activeBiome === 'ancient';
 
     for (const ch of this.chunks) {
+      const curBuilt = this.ensureThemeBuiltForChunk(ch, this.activeTheme);
+      ch.activeBuilt = curBuilt;
+
       ch.groundBaseGroup.visible = showGround;
       ch.skyBaseGroup.visible = showSky;
       ch.spaceBaseGroup.visible = showSpace;
-      ch.roadCrackGroup.visible = showGround && showCracks;
+      ch.urbanRailsGroup.visible = showGround && curBuilt.useUrbanGuardrails;
+      ch.roadCrackGroup.visible = showGround && curBuilt.showRoadFissures;
 
-      for (const b of ALL_BIOMES) {
-        ch.groundBiomes[b].visible = showGround && b === this.activeBiome;
-        ch.skyBiomes[b].visible = showSky && b === this.activeBiome;
-        ch.spaceBiomes[b].visible = showSpace && b === this.activeBiome;
+      for (const [theme, built] of ch.themeCache) {
+        const isCurrent = theme === this.activeTheme;
+        built.ground.visible = showGround && isCurrent;
+        built.roadOverlay.visible = showGround && isCurrent;
+        built.sky.visible = showSky && isCurrent;
+        built.space.visible = showSpace && isCurrent;
       }
     }
+
     this.starField.visible = showSpace;
     this.skyBackdropPlanet.visible = showSpace;
     if (this.skylineGroup) {
-      this.skylineGroup.visible = showGround && (this.activeBiome === 'urban' || this.activeBiome === 'industrial');
+      this.skylineGroup.visible =
+        showGround && (this.activeTheme === 'cyber' || this.activeTheme === 'metropolis');
     }
   }
 
   applyDimension(dim: DimensionConfig): void {
-    this.activeBiome = getBiomeForTheme(dim.propTheme);
+    this.activeTheme = dim.propTheme;
 
     this.accentBeaconMat.color.setHex(dim.curbEmissive);
     this.accentBeaconMat.emissive.setHex(dim.curbEmissive);
     this.skyRibbonMat.color.setHex(dim.accentColor);
     this.spaceRailMat.color.setHex(dim.spaceNebulaColor);
     this.propMat.color.setHex(dim.roadColor);
-    this.terrainMat.color.setHex(dim.hemiGroundColor).lerp(new THREE.Color(0x1e293b), 0.18);
+    this.roadMat.color.setHex(0xe2e8f0).lerp(new THREE.Color(dim.roadColor), 0.28);
+    this.curbMat.color.setHex(dim.roadColor).lerp(new THREE.Color(dim.horizonColor), 0.32);
+    this.terrainMat.color
+      .setHex(dim.hemiGroundColor)
+      .lerp(new THREE.Color(dim.horizonColor), 0.36);
 
     // Muted atmospheric clouds synced to dimension horizon/sky (NEVER blinding white)
     this.cloudMat.color
@@ -1663,33 +1224,32 @@ export class WorldManager {
       .lerp(new THREE.Color(dim.skyColor), 0.38)
       .lerp(new THREE.Color(0x334155), 0.25);
 
-    // Road fissure / crack coloration per biome
-    if (this.activeBiome === 'volcanic') {
+    // Road fissure / crack coloration tailored per distinct theme
+    if (this.activeTheme === 'volcanic') {
       this.fissureMat.color.setHex(0xf97316);
       this.fissureMat.emissive.setHex(0xc2410c);
-      this.fissureMat.emissiveIntensity = 0.72;
-    } else if (this.activeBiome === 'quantum') {
+      this.fissureMat.emissiveIntensity = 0.78;
+    } else if (this.activeTheme === 'quantum') {
       this.fissureMat.color.setHex(0x38bdf8);
       this.fissureMat.emissive.setHex(0x7c3aed);
-      this.fissureMat.emissiveIntensity = 0.76;
-    } else if (this.activeBiome === 'crystal') {
-      this.fissureMat.color.setHex(0x7dd3fc);
-      this.fissureMat.emissive.setHex(0x0284c7);
-      this.fissureMat.emissiveIntensity = 0.52;
+      this.fissureMat.emissiveIntensity = 0.8;
+    } else if (this.activeTheme === 'crystal') {
+      this.fissureMat.color.setHex(0xc084fc);
+      this.fissureMat.emissive.setHex(0x7e22ce);
+      this.fissureMat.emissiveIntensity = 0.56;
+    } else if (this.activeTheme === 'pyramid') {
+      this.fissureMat.color.setHex(0xd97706);
+      this.fissureMat.emissive.setHex(0x92400e);
+      this.fissureMat.emissiveIntensity = 0.42;
+    } else if (this.activeTheme === 'storm') {
+      this.fissureMat.color.setHex(0x93c5fd);
+      this.fissureMat.emissive.setHex(0x2563eb);
+      this.fissureMat.emissiveIntensity = 0.78;
     } else {
       this.fissureMat.color.setHex(dim.accentColor);
       this.fissureMat.emissive.setHex(dim.curbEmissive);
-      this.fissureMat.emissiveIntensity = 0.45;
+      this.fissureMat.emissiveIntensity = 0.48;
     }
-
-    // Dynamic tinting for biome accents (crystal/nature/quantum/volcanic)
-    this.magmaMat.color.setHex(dim.accentColor).lerp(new THREE.Color(0xf97316), 0.65);
-    this.magmaMat.emissive.setHex(0xd9480f);
-    this.quantumGlowMat.color.setHex(dim.accentColor);
-    this.quantumGlowMat.emissive.setHex(dim.spaceNebulaColor).lerp(new THREE.Color(dim.curbEmissive), 0.55);
-    this.crystalMat.color.setHex(dim.keyLightColor).lerp(new THREE.Color(dim.accentColor), 0.45);
-    this.crystalMat.emissive.setHex(dim.spaceNebulaColor);
-    this.natureBlossomMat.color.setHex(dim.hemiSkyColor).lerp(new THREE.Color(dim.accentColor), 0.35);
 
     this.backdropRidgeNearMat.color.setHex(dim.hemiGroundColor).lerp(new THREE.Color(dim.horizonColor), 0.28);
     this.backdropRidgeFarMat.color.setHex(dim.horizonColor).lerp(new THREE.Color(dim.skyColor), 0.42);
@@ -1716,8 +1276,22 @@ export class WorldManager {
     this.syncBiomeAndLayerVisibility();
   }
 
+  populateLayerAhead(
+    altitude: AltitudeLayer,
+    distanceMeters: number,
+    dim: DimensionConfig,
+    bossActive: boolean
+  ): void {
+    const hasAhead = this.obstacles.some(
+      (o) => o.active && o.altitude === altitude && o.z >= -145 && o.z <= -22
+    );
+    if (hasAhead) return;
+    this.spawnWaveAtZ(-76, altitude, distanceMeters, dim, bossActive);
+    this.spawnWaveAtZ(-116, altitude, distanceMeters, dim, bossActive);
+  }
+
   resetRun(): void {
-    this.nextSpawnZ = -65;
+    this.nextSpawnZ = -28;
     this.waveIndex = 0;
     for (let i = 0; i < this.chunks.length; i++) {
       this.chunks[i].zCenter = -i * PHYSICS_CONFIG.chunkLength + PHYSICS_CONFIG.chunkLength * 0.2;
@@ -1835,12 +1409,46 @@ export class WorldManager {
     vAst.visible = false;
     vVolc.visible = false;
     vQuant.visible = false;
+    for (const grp of obs.hazardGroups.values()) {
+      grp.visible = false;
+    }
 
     obs.requiresCrouch = false;
     obs.requiresJump = false;
     obs.destructible = true;
 
-    if (kind === 'LASER_GATE') {
+    const sigGroup = getOrBuildSignatureHazardGroup(kind, obs.mesh, obs.hazardGroups);
+    if (sigGroup) {
+      sigGroup.visible = true;
+      const animBody = sigGroup.getObjectByName('animBody');
+      if (animBody) {
+        animBody.position.set(0, 0, 0);
+        animBody.rotation.set(0, 0, 0);
+        const treePivot = animBody.getObjectByName('treePivot');
+        if (treePivot) {
+          treePivot.position.set(0, 0, 0);
+          treePivot.rotation.set(0, 0, 0);
+        }
+      }
+      if (kind === 'TOXIC_POOL' || kind === 'OCEAN_WAVE') {
+        obs.requiresJump = obs.altitude === 'GROUND';
+        obs.halfWidth = 1.2;
+        obs.halfHeight = 0.68;
+        obs.halfDepth = 0.85;
+      } else if (kind === 'FALLING_TREE' || kind === 'GOLD_TOWER_FALL') {
+        obs.halfWidth = 1.25;
+        obs.halfHeight = 1.1;
+        obs.halfDepth = 0.9;
+      } else if (kind === 'LIGHTNING_STRIKE' || kind === 'RUINS_STATUE') {
+        obs.halfWidth = 1.1;
+        obs.halfHeight = 1.4;
+        obs.halfDepth = 0.9;
+      } else {
+        obs.halfWidth = 1.15;
+        obs.halfHeight = 1.15;
+        obs.halfDepth = 0.95;
+      }
+    } else if (kind === 'LASER_GATE') {
       vLaser.visible = true;
       obs.requiresCrouch = true;
       obs.destructible = false;
@@ -1905,7 +1513,7 @@ export class WorldManager {
     bossActive: boolean
   ): void {
     const baseY = ALTITUDE_HEIGHTS[altitude];
-    const biome = getBiomeForTheme(dim.propTheme);
+    const sigKind = getSignatureObstacleForTheme(dim.propTheme);
 
     const openLane = Math.floor(Math.random() * 3);
     const coinLane = (openLane + (Math.random() > 0.5 ? 1 : 0)) % 3;
@@ -1953,33 +1561,34 @@ export class WorldManager {
     if (bossActive) return;
 
     const kindsByAlt: Record<AltitudeLayer, ObstacleKind[]> = {
-      GROUND: ['ROAD_BARRIER', 'ENERGY_CRATE', 'TRAFFIC_VEHICLE', 'LASER_GATE', 'HEAVY_BLOCK', 'MOVING_OBSTACLE'],
-      SKY: ['ENERGY_CRATE', 'ENEMY_AIRCRAFT', 'MOVING_OBSTACLE', 'LASER_GATE'],
-      SPACE: ['ASTEROID', 'ENERGY_CRATE', 'MOVING_OBSTACLE', 'HEAVY_BLOCK'],
+      GROUND: ['ROAD_BARRIER', 'ENERGY_CRATE', 'TRAFFIC_VEHICLE', 'LASER_GATE', 'HEAVY_BLOCK'],
+      SKY: ['ENERGY_CRATE', 'ENEMY_AIRCRAFT', 'LASER_GATE'],
+      SPACE: ['ASTEROID', 'ENERGY_CRATE', 'HEAVY_BLOCK'],
     };
 
+    let spawnedSigInWave = false;
     for (let lane = 0; lane < 3; lane++) {
       if (lane === openLane) continue;
-      if (Math.random() > 0.66) continue;
+      if (Math.random() > 0.72) continue;
 
       const obs = this.obstacles.find((o) => !o.active);
       if (!obs) break;
 
+      // Every wave across Ground, Sky, and Space showcases the dimension's signature obstacle!
       let kind: ObstacleKind;
-      if (biome === 'volcanic' && (lane === 0 || Math.random() > 0.42)) {
-        kind = 'VOLCANIC_ROCK';
-      } else if (biome === 'quantum' && (lane === 0 || Math.random() > 0.42)) {
-        kind = 'QUANTUM_RIFT';
+      if (!spawnedSigInWave || Math.random() < 0.68) {
+        kind = sigKind;
+        spawnedSigInWave = true;
       } else {
         const poolKinds = kindsByAlt[altitude];
         kind = poolKinds[Math.floor(Math.random() * poolKinds.length)];
       }
 
       const baseHp =
-        kind === 'HEAVY_BLOCK'
-          ? 140
-          : kind === 'TRAFFIC_VEHICLE' || kind === 'ENEMY_AIRCRAFT' || kind === 'VOLCANIC_ROCK'
-            ? 90
+        kind === 'HEAVY_BLOCK' || kind === 'RUINS_STATUE' || kind === 'GOLD_TOWER_FALL'
+          ? 125
+          : kind === 'TRAFFIC_VEHICLE' || kind === 'ENEMY_AIRCRAFT' || kind === 'VOLCANIC_ROCK' || kind === 'RISING_PYRAMID'
+            ? 85
             : 55;
       const hp = calculateObstacleHP(baseHp, distanceMeters);
 
@@ -1991,19 +1600,36 @@ export class WorldManager {
       obs.eruptTargetY = baseY;
       obs.x = obs.eruptTargetX;
       obs.y = obs.eruptTargetY;
+      obs.visualX = obs.x;
+      obs.visualY = obs.y;
       obs.z = z;
       obs.hp = hp;
       obs.maxHp = hp;
       obs.hitFlashTimer = 0;
       obs.moveDir = lane === 0 ? 1 : -1;
       obs.movePhase = Math.random() * Math.PI * 2;
-      obs.rewardCoins = kind === 'HEAVY_BLOCK' || kind === 'VOLCANIC_ROCK' ? 45 : 25;
+      obs.rewardCoins = kind === 'HEAVY_BLOCK' || kind === sigKind ? 40 : 25;
 
-      // Setup volcano crater eruption parabolic arc for VOLCANIC_ROCK
+      const flankSide = lane === 0 ? -1 : lane === 2 ? 1 : Math.random() > 0.5 ? 1 : -1;
       if (kind === 'VOLCANIC_ROCK') {
-        const eruptSide = lane === 0 ? -1 : lane === 2 ? 1 : Math.random() > 0.5 ? 1 : -1;
-        obs.eruptStartX = eruptSide * 15.5;
+        obs.eruptStartX = flankSide * 15.5;
         obs.eruptStartY = altitude === 'GROUND' ? 11.5 : baseY - 6;
+        obs.eruptProgress = 0;
+      } else if (
+        kind === 'LIGHTNING_STRIKE' ||
+        kind === 'FALLING_CRYSTAL' ||
+        kind === 'SLIDING_ICEBERG' ||
+        kind === 'RISING_PYRAMID' ||
+        kind === 'FALLING_TREE' ||
+        kind === 'GOLD_TOWER_FALL' ||
+        kind === 'OCEAN_WAVE' ||
+        kind === 'RUINS_STATUE' ||
+        kind === 'LUNAR_METEOR' ||
+        kind === 'FROST_SPIKE' ||
+        kind === 'SOLAR_FLARE'
+      ) {
+        obs.eruptStartX = obs.eruptTargetX + flankSide * 7.2;
+        obs.eruptStartY = baseY;
         obs.eruptProgress = 0;
       } else {
         obs.eruptProgress = 1;
@@ -2064,11 +1690,13 @@ export class WorldManager {
         obs.movePhase += dt * 2.4;
         obs.x = Math.sin(obs.movePhase) * 3.4;
       }
+      obs.visualX = obs.x;
+      obs.visualY = obs.y;
+
       if (obs.kind === 'VOLCANIC_ROCK') {
         const vVolc = obs.mesh.getObjectByName('var_volcanic')!;
         const boulder = vVolc.getObjectByName('volcBoulder')!;
         if (obs.eruptProgress < 1) {
-          // Erupt from volcano crater up into sky and arc onto the target road lane!
           obs.eruptProgress = Math.min(1, obs.eruptProgress + dt * 0.65);
           const u = obs.eruptProgress;
           const arcY = Math.sin(u * Math.PI) * 14.5;
@@ -2077,17 +1705,21 @@ export class WorldManager {
           boulder.position.set(curX - obs.eruptTargetX, curY - obs.eruptTargetY, 0);
           boulder.rotation.x += dt * 3.5;
           boulder.rotation.z += dt * 2.4;
+          obs.visualX = curX;
+          obs.visualY = curY;
         } else {
           boulder.position.set(0, 0, 0);
         }
-      }
-      if (obs.kind === 'QUANTUM_RIFT') {
+      } else if (obs.kind === 'QUANTUM_RIFT') {
         const vQuant = obs.mesh.getObjectByName('var_quantum')!;
         const spinner = vQuant.getObjectByName('quantSpinner');
         const qRing = vQuant.getObjectByName('quantRing');
         if (spinner) spinner.rotation.y += dt * 4.0;
         if (qRing) qRing.rotation.z -= dt * 2.6;
+      } else if (obs.hazardGroups.has(obs.kind)) {
+        updateSignatureHazardAnimation(obs, dt);
       }
+
       if (obs.hitFlashTimer > 0) {
         obs.hitFlashTimer -= dt;
         const flashHex = obs.hitFlashTimer > 0 ? 0xffffff : 0x000000;

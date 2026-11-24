@@ -13,6 +13,7 @@ import {
   WEAPON_SPECS,
 } from './config';
 import { getDimensionById } from './dimensions';
+import { haptics } from './haptics';
 import { t } from './localization';
 import {
   advanceCombo,
@@ -157,6 +158,7 @@ export class GameEngine {
     this.container = container;
     this.saveData = initialSave;
     this.callbacks = callbacks;
+    haptics.setEnabled(initialSave.settings.haptics !== false);
     this.init();
   }
 
@@ -353,6 +355,7 @@ export class GameEngine {
     const prevWing = this.saveData.upgrades.wings;
     this.saveData = save;
     audioManager.updateSettings(save.settings);
+    haptics.setEnabled(save.settings.haptics !== false);
 
     if (
       prevVehicle !== save.selectedVehicle ||
@@ -439,6 +442,7 @@ export class GameEngine {
     audioManager.setAmbientBaseFreq(dim.ambientFreq);
     if (playAudio) {
       audioManager.playDimensionalShift();
+      haptics.trigger('shift');
     }
   }
 
@@ -585,6 +589,7 @@ export class GameEngine {
     this.overdriveTimer = PHYSICS_CONFIG.overdriveDuration;
     this.cameraTrauma = Math.min(1, this.cameraTrauma + 0.4);
     audioManager.playOverdrive();
+    haptics.trigger('overdrive');
     this.pushNotification(t(this.saveData.language, 'overdrive_active'), '#00f0ff');
     this.emitHud();
   }
@@ -598,15 +603,18 @@ export class GameEngine {
       this.alertMessage = `${t(this.saveData.language, 'vehicle_not_compatible')} — ${t(this.saveData.language, reqKey)}`;
       this.alertTimer = 2.6;
       audioManager.playHit();
+      haptics.trigger('hit');
       this.emitHud();
       return;
     }
     this.altitude = target;
     this.targetAltitudeY = ALTITUDE_HEIGHTS[target];
     this.world.setLayerVisibility(target, false);
+    this.world.populateLayerAhead(target, this.distance, this.currentDim, this.activeBossConfig !== null);
     this.vy = Math.max(this.vy, 6);
     this.isGrounded = false;
     audioManager.playDimensionalShift();
+    haptics.trigger('shift');
     this.pushNotification(t(this.saveData.language, target.toLowerCase()), '#38bdf8');
     this.emitHud();
   }
@@ -618,6 +626,13 @@ export class GameEngine {
     if (canEnterAltitude(getVehicleById(this.saveData.selectedVehicle), option.environmentFocus)) {
       this.altitude = option.environmentFocus;
       this.targetAltitudeY = ALTITUDE_HEIGHTS[option.environmentFocus];
+      this.world.setLayerVisibility(option.environmentFocus, false);
+      this.world.populateLayerAhead(
+        option.environmentFocus,
+        this.distance,
+        this.currentDim,
+        this.activeBossConfig !== null
+      );
     }
     this.pushNotification(`+${option.bonusCoins} ${t(this.saveData.language, 'coins')}`, '#facc15');
     this.setState(this.activeBossConfig ? 'BOSS_BATTLE' : 'GAMEPLAY');
@@ -640,6 +655,8 @@ export class GameEngine {
     const dmg = stats.weaponDamage;
 
     audioManager.playWeapon(v.weaponType);
+    const isHeavy = weapon.pattern === 'pierce' || weapon.pattern === 'nova' || weapon.pattern === 'homing';
+    haptics.trigger(isHeavy ? 'weapon_heavy' : 'weapon');
 
     switch (weapon.pattern) {
       case 'single':
@@ -1050,12 +1067,8 @@ export class GameEngine {
       // Player projectile vs Obstacles
       for (const obs of obstacles) {
         if (!obs.active || !obs.destructible) continue;
-        const isEruptingVolc = obs.kind === 'VOLCANIC_ROCK' && obs.eruptProgress < 1;
-        const u = obs.eruptProgress;
-        const obsWorldX = isEruptingVolc ? THREE.MathUtils.lerp(obs.eruptStartX, obs.eruptTargetX, u) : obs.x;
-        const obsWorldY = isEruptingVolc
-          ? THREE.MathUtils.lerp(obs.eruptStartY, obs.eruptTargetY, u) + Math.sin(u * Math.PI) * 14.5
-          : obs.y;
+        const obsWorldX = obs.visualX;
+        const obsWorldY = obs.visualY;
         if (
           Math.abs(pr.x - obsWorldX) < obs.halfWidth + 0.5 &&
           Math.abs(pr.z - obs.z) < obs.halfDepth + 0.9 &&
@@ -1069,6 +1082,7 @@ export class GameEngine {
           obs.hp -= pr.damage;
           obs.hitFlashTimer = 0.06;
           audioManager.playHit();
+          haptics.trigger('hit');
           this.world.spawnExplosion(pr.x, pr.y, pr.z, 0xfbbf24, 4);
 
           const ratio = Math.max(0, obs.hp / obs.maxHp);
@@ -1089,6 +1103,7 @@ export class GameEngine {
             this.hitstopTimer = 0.035;
             this.cameraTrauma = Math.min(1, this.cameraTrauma + 0.25);
             audioManager.playExplosion();
+            haptics.trigger('explosion');
             this.world.spawnExplosion(obsWorldX, obsWorldY + 1, obs.z, 0xf97316, 16);
             this.pushNotification(`+${gained}`, '#facc15');
           }
@@ -1100,12 +1115,8 @@ export class GameEngine {
     // 2. Player vs Obstacles
     for (const obs of obstacles) {
       if (!obs.active) continue;
-      const isEruptingVolc = obs.kind === 'VOLCANIC_ROCK' && obs.eruptProgress < 1;
-      const u = obs.eruptProgress;
-      const obsWorldX = isEruptingVolc ? THREE.MathUtils.lerp(obs.eruptStartX, obs.eruptTargetX, u) : obs.x;
-      const obsWorldY = isEruptingVolc
-        ? THREE.MathUtils.lerp(obs.eruptStartY, obs.eruptTargetY, u) + Math.sin(u * Math.PI) * 14.5
-        : obs.y;
+      const obsWorldX = obs.visualX;
+      const obsWorldY = obs.visualY;
       if (
         Math.abs(obsWorldX - this.playerX) < obs.halfWidth + pRadiusX &&
         Math.abs(obs.z - 0) < obs.halfDepth + pRadiusZ
@@ -1120,6 +1131,7 @@ export class GameEngine {
             this.obstaclesDestroyed++;
             this.runCoins += 35;
             audioManager.playExplosion();
+            haptics.trigger('explosion');
             this.world.spawnExplosion(obsWorldX, obsWorldY + 1, obs.z, 0x00f0ff, 14);
           } else {
             obs.active = false;
@@ -1148,6 +1160,7 @@ export class GameEngine {
         this.score += gained * 2;
         this.overdriveCharge = Math.min(100, this.overdriveCharge + (coin.isGem ? 12 : 4));
         audioManager.playCoin(this.combo);
+        haptics.trigger(coin.isGem ? 'gem' : 'coin');
         this.world.spawnExplosion(coin.x, coin.y, coin.z, coin.isGem ? 0x38bdf8 : 0xfacc15, 5);
       }
     }
@@ -1163,6 +1176,7 @@ export class GameEngine {
         pu.active = false;
         pu.mesh.visible = false;
         audioManager.playOverdrive();
+        haptics.trigger('powerup');
         if (pu.kind === 'HEART') {
           this.hearts = Math.min(this.maxHearts, this.hearts + 1);
           this.pushNotification('+1 HEART', '#f43f5e');
@@ -1187,6 +1201,7 @@ export class GameEngine {
       this.invulnTimer = 0.8;
       this.cameraTrauma = Math.min(1, this.cameraTrauma + 0.45);
       audioManager.playExplosion();
+      haptics.trigger('shield_absorb');
       this.world.spawnExplosion(this.playerX, this.currentAltitudeY + 1, 0, 0x00f0ff, 14);
       this.emitHud();
       return;
@@ -1199,6 +1214,7 @@ export class GameEngine {
     this.combo = 1.0;
     this.comboTimer = 0;
     audioManager.playCollision();
+    haptics.trigger('collision');
     this.world.spawnExplosion(this.playerX, this.currentAltitudeY + 1, 0, 0xf43f5e, 18);
 
     if (this.hearts <= 0) {
@@ -1225,6 +1241,7 @@ export class GameEngine {
     this.scene.add(this.activeBossRig.root);
 
     audioManager.playBossWarning();
+    haptics.trigger('boss_warning');
     this.setState('BOSS_BATTLE');
   }
 
@@ -1299,6 +1316,7 @@ export class GameEngine {
       this.hitstopTimer = 0.075;
       this.cameraTrauma = 0.9;
       audioManager.playBossDefeat();
+      haptics.trigger('boss_defeat');
       this.world.spawnExplosion(this.bossX, this.currentAltitudeY + 3.2, -36, this.activeBossConfig.coreColor, 34);
       this.pushNotification(`${t(this.saveData.language, 'boss_defeated')} +${reward}`, '#facc15');
       this.clearBoss();

@@ -8,6 +8,8 @@ import { DIMENSIONS } from './dimensions';
 import {
   AltitudeLayer,
   BossConfig,
+  DimensionConfig,
+  ObstacleKind,
   RouteOption,
   SaveData,
   UpgradeLevels,
@@ -49,8 +51,54 @@ export function createDefaultSaveData(): SaveData {
       muted: false,
       graphicsQuality: 'AUTO',
       autoFire: false,
+      haptics: true,
     },
   };
+}
+
+export function getSignatureObstacleForTheme(theme: DimensionConfig['propTheme']): ObstacleKind {
+  switch (theme) {
+    case 'volcanic':
+      return 'VOLCANIC_ROCK';
+    case 'metropolis':
+      return 'GOLD_TOWER_FALL';
+    case 'cyber':
+      return 'CYBER_BOT_CROSS';
+    case 'crystal':
+      return 'FALLING_CRYSTAL';
+    case 'glacier':
+      return 'SLIDING_ICEBERG';
+    case 'pyramid':
+      return 'RISING_PYRAMID';
+    case 'sakura':
+      return 'SAKURA_KATANA';
+    case 'forest':
+      return 'FALLING_TREE';
+    case 'ocean':
+      return 'OCEAN_WAVE';
+    case 'storm':
+      return 'LIGHTNING_STRIKE';
+    case 'ruins':
+      return 'RUINS_STATUE';
+    case 'magnetic':
+      return 'MAGNETIC_CORE';
+    case 'nebula':
+      return 'NEBULA_VORTEX';
+    case 'lunar':
+      return 'LUNAR_METEOR';
+    case 'citadel':
+      return 'FROST_SPIKE';
+    case 'machine':
+      return 'CLOCKWORK_GEAR';
+    case 'toxic':
+      return 'TOXIC_POOL';
+    case 'solar':
+      return 'SOLAR_FLARE';
+    case 'quantum':
+      return 'QUANTUM_RIFT';
+    case 'eternal':
+      return 'ETERNAL_RING';
+  }
 }
 
 export function canEnterAltitude(vehicle: VehicleData, target: AltitudeLayer): boolean {
@@ -319,6 +367,7 @@ export function validateSaveObject(raw: unknown): SaveData | null {
           ? (s.graphicsQuality as SaveData['settings']['graphicsQuality'])
           : defaults.settings.graphicsQuality,
       autoFire: typeof s.autoFire === 'boolean' ? s.autoFire : defaults.settings.autoFire,
+      haptics: typeof s.haptics === 'boolean' ? s.haptics : defaults.settings.haptics,
     },
   };
 }

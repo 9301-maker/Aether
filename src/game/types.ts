@@ -30,6 +30,36 @@ export type LanguageCode = 'th' | 'en' | 'ja' | 'zh' | 'ko' | 'es';
 
 export type GraphicsQuality = 'AUTO' | 'LOW' | 'MEDIUM' | 'HIGH';
 
+export type ObstacleKind =
+  | 'ROAD_BARRIER'
+  | 'ENERGY_CRATE'
+  | 'TRAFFIC_VEHICLE'
+  | 'LASER_GATE'
+  | 'HEAVY_BLOCK'
+  | 'MOVING_OBSTACLE'
+  | 'ENEMY_AIRCRAFT'
+  | 'ASTEROID'
+  | 'VOLCANIC_ROCK'
+  | 'GOLD_TOWER_FALL'
+  | 'CYBER_BOT_CROSS'
+  | 'FALLING_CRYSTAL'
+  | 'SLIDING_ICEBERG'
+  | 'RISING_PYRAMID'
+  | 'SAKURA_KATANA'
+  | 'FALLING_TREE'
+  | 'OCEAN_WAVE'
+  | 'LIGHTNING_STRIKE'
+  | 'RUINS_STATUE'
+  | 'MAGNETIC_CORE'
+  | 'NEBULA_VORTEX'
+  | 'LUNAR_METEOR'
+  | 'FROST_SPIKE'
+  | 'CLOCKWORK_GEAR'
+  | 'TOXIC_POOL'
+  | 'SOLAR_FLARE'
+  | 'QUANTUM_RIFT'
+  | 'ETERNAL_RING';
+
 export interface WeaponSpec {
   id: WeaponId;
   nameKey: string;
@@ -85,6 +115,7 @@ export interface GameSettings {
   muted: boolean;
   graphicsQuality: GraphicsQuality;
   autoFire: boolean;
+  haptics?: boolean;
 }
 
 export interface SaveData {
